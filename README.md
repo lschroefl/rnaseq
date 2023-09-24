@@ -8,6 +8,7 @@ I usually have a long script from which I execute small code snippets consecutiv
 A small description to some of the scripts in this repository: 
 
 **flow_neuronet.sh** -> a bash script that contains all the steps from receiving raw fastq files until the creation of a count table containing genes as rows and samples as columns(ie. quality control, mapping, some mapping statistics calculations).
+
 **flow_neuronet.Rmd** -> a R markdown file that presents the results in html format, in a clean and neat way. My analysis continues with the count table (from flow_neuronet.sh), performs differential gene expression analysis, gene set enrichment anaylisis, clustering and diverse visualizations for an intuitive understanding and exploration of the data. 
 transform_to_integer.pl -> a perl script that rounds the count table, in case there are floats. 
 
