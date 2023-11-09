@@ -1,0 +1,1897 @@
+---
+output: 
+    html_document: 
+        code_folding: hide
+---
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+<pre>
+</pre>
+# Neuronet{.tabset}
+<br>
+</br>
+<font size = "5">For all experimental conditions, the bulk RNA was isolated from 
+the mouse brain
+
++ of **treated** (4Rx) or **untreated** mice
++ from different regions (**penumbra** or **core**) 
++ for different timepoints (**3 days** or **7 days**) 
+
+after **middle cerebral artery occlusion**, then sequenced via Illumina next-generation sequencing. 
+The **raw reads** were used for pseudomapping with **salmon**, then subsequently
+**DESeq2** was used to infer differential gene expression, adn gene set enrichment 
+analysis was performed via **clusteRprofiler**.
+</font>
+<br>
+</br>
+<font size = "5">Experimental groups:
+
+ + ctrl - 3 days - penumbra
+ + sham - 3 days - penumbra
+ + trt(4Rx) - 3 days - penumbra 
+ + ctrl - 7 days - penumbra
+ + trt(4Rx) - 7 days - penumbra
+ + ctrl - 7 days - core
+ + trt(4Rx) - 7 days - core 
+  
+The model for differentially expression is based on the 
+**contrast of control to treatment**, ctrl is set as the reference level.</font>
+
+<pre>
+</pre>
+## PCA 
+### PCA PUBLICATION
+```{r pcaPublication, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 16, fig.align = "center"}
+## why to use log transformed data for PCA: 
+## https://stats.stackexchange.com/questions/164381/why-log-transforming-the-data-before-performing-principal-component-analysis
+plt <- prcomp(t(assay(rlog)), scale = TRUE)
+var_explained <- data.frame("var_explained" = plt$sdev**2/sum(plt$sdev**2))
+var_explained$PC <- factor(sprintf("PC%s", seq(1:nrow(var_explained))), levels = sprintf("PC%s", seq(1:nrow(var_explained))))
+
+# variation explained by the respectice PC
+ellbowplot <- ggplot(var_explained, aes(y = var_explained, x = PC)) + 
+geom_bar(stat = "identity") +
+geom_text(aes(label = round(var_explained, digits = 2)), vjust = -0.5) + 
+ggtitle("Variance explained by the respective PC's")
+# PCA clustering to group
+plot1 <- plt$x %>%
+    as.data.frame %>%
+        ggplot(aes(x = PC1, y = PC2, color = samples$timeAfterStroke, shape = samples$condition)) + 
+        geom_point(size = 4) + 
+        guides(color = guide_legend("days after Stroke"), shape = guide_legend("condition")) +
+        scale_color_manual(values = c("day3" = "#971919", "day7" = "#6a22b3", "day14" = "#1b87c6", "sham" = "#2cbc38")) +
+        scale_shape_manual(values = c("4Rx" = 15, "ctrl" = 16, "sham" = 17)) +
+        labs (
+            x = paste ("PC1: ", round(var_explained[1,1]*100, 0), "%"), 
+            y = paste("PC2: ", round(var_explained[2,1]*100, 0), "%")) +
+        ggtitle("PCA clustered to group") + 
+        theme_minimal()
+
+
+# pca clustering to condition
+plot1
+ggsave("/projects/neuronet/neuronet/results/pdf/pca.pdf" ,plot = plot1, device = "pdf")
+
+```
+<pre>
+
+
+
+</pre>
+### PCA with PC2 and PC3 re-established time after stroke and brain region as deterministic
+```{r pcaPC2PC3, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 16, fig.align = "center"}
+plt <- prcomp(t(assay(rlog)), scale = TRUE)
+var_explained <- data.frame("var_explained" = plt$sdev**2/sum(plt$sdev**2))
+var_explained$PC <- factor(sprintf("PC%s", seq(1:nrow(var_explained))), levels = sprintf("PC%s", seq(1:nrow(var_explained))))
+
+plot1 <- plt$x %>%
+    as.data.frame %>%
+        ggplot(aes(x = PC2, y = PC3, color = samples$timeAfterStroke, shape = samples$brainRegion)) + 
+        geom_point(size = 4) + 
+        guides(color = guide_legend("days after Stroke"), shape = guide_legend("brainRegion")) +
+        scale_color_manual(values = c("day3" = "#971919", "day7" = "#6a22b3", "day14" = "#1b87c6", "sham" = "#2cbc38")) +
+        scale_shape_manual(values = c("ipsiPenumbra" = 16, "ipsiCore" = 17)) +
+        labs (
+            x = paste ("PC2: ", round(var_explained[2,1]*100, 0), "%"), 
+            y = paste("PC3: ", round(var_explained[3,1]*100, 0), "%")) +
+        ggtitle("PCA clustered to group") + 
+        theme_minimal()
+plot1
+ggsave("/projects/neuronet/neuronet/results/pdf/pcaPC23.pdf" ,plot = plot1, device = "pdf")
+
+```
+<pre>
+
+
+
+
+</pre>
+## Volcano
+### Volcano plots with labels
+Scatterplot showing statistical significance [-log10(padj)] versus magnitude of change [log2FoldChange].
+```{r volcano, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 16, fig.align = "center"}
+counter <- 1
+
+resultsList <- list(
+    "trt3penVSctrl3pen" = trt3penVSctrl3pen,
+    "trt7penVSctrl7pen" = trt7penVSctrl7pen,
+    "trt7coreVSctrl7core" = trt7coreVSctrl7core,
+    "trt14penVSctrl14pen" = trt14penVSctrl14pen,
+    "ctrl7penVSctrl3pen" = ctrl7penVSctrl3pen,
+    "ctrl14penVSctrl3pen" = ctrl14penVSctrl3pen,
+    "ctrl14penVSctrl7pen" = ctrl14penVSctrl7pen,
+    "trt7penVStrt3pen" = trt7penVStrt3pen,
+    "trt14penVStrt3pen" = trt14penVStrt3pen,
+    "trt14penVStrt7pen" = trt14penVStrt7pen,
+    "sham3penVSctrl3pen" = sham3penVSctrl3pen,
+    "sham3penVStrt3pen" = sham3penVStrt3pen,
+    "sham3penVSctrl7pen" = sham3penVSctrl7pen,
+    "sham3penVStrt7pen" = sham3penVStrt7pen,
+    "sham3penVSctrl7core" = sham3penVSctrl7core,
+    "sham3penVStrt7core" = sham3penVStrt7core,
+    "sham3penVSctrl14pen" = sham3penVSctrl14pen,
+    "sham3penVStrt14pen" = sham3penVStrt14pen,
+    "ctrl7coreVSctrl7pen" = ctrl7coreVSctrl7pen,
+    "trt7coreVStrt7pen" = trt7coreVStrt7pen,
+    "timeInteraction" = timeInteraction,
+    "timeReduced" = timeReduced)
+
+lfcThreshold <- 0.9999
+padjThreshold <- 0.0005
+labelThreshold <- 0.995
+
+## for some reason the extreme lfc are not shown, but fuck it
+
+names(resultsList)[1]
+
+for(result in resultsList){
+    volcano <- as.data.frame(na.omit(result)) %>% dplyr::mutate(
+        significant = padj < 0.1, 
+        significant = ifelse(significant & log2FoldChange < 0, "Up", significant), 
+        significant = ifelse(significant == "TRUE" & log2FoldChange > 0, "Down", significant)
+        ) %>% dplyr::mutate(
+        outOfBoundsPadj = padj < quantile(padj, probs = padjThreshold), 
+        padj = ifelse(outOfBoundsPadj, quantile(padj, probs = padjThreshold), padj)
+        ) %>% dplyr::mutate(
+        outOfBoundsLFC = abs(log2FoldChange) > quantile(log2FoldChange, probs = lfcThreshold), 
+        log2FoldChange = ifelse(outOfBoundsLFC, quantile(log2FoldChange, probs = lfcThreshold) * sign(log2FoldChange), log2FoldChange)
+        ) %>% dplyr::mutate(
+        outOfBounds = ifelse(outOfBoundsPadj | outOfBoundsLFC, TRUE, FALSE)
+        ) %>%
+        ggplot(aes(x = log2FoldChange, y = -log10(padj), color = significant, label = "row.names", shape = outOfBounds)) +
+        geom_point(size = 2, na.rm = TRUE) +
+        scale_color_manual(
+            "Significance",
+            values = c("#C77CFF", "grey80", "#F8766D"),
+            labels = c("sig Up", "no sig", "sig Down")) +
+        geom_text_repel(
+            aes(x = log2FoldChange,
+                y = -log10(padj),
+                label = ifelse(-log10(padj) > quantile(-log10(padj), probs = labelThreshold) & abs(log2FoldChange) > 1, as.character(rownames(as.data.frame(result))), "")),
+            hjust = 0,
+            vjust = -1.2,
+            segment.color = NA) + 
+        xlim(quantile(result$log2FoldChange, probs = lfcThreshold)*-1+0.2,quantile(result$log2FoldChange, probs =lfcThreshold)) +
+        ylim(c(0, -log10(quantile(result$padj, probs = padjThreshold, digits = 20, na.rm = TRUE)))) +
+        geom_vline(xintercept = c(1, -1), col = "gray", linetype = "dashed") +
+        geom_hline(yintercept = -log10(.1), col = "gray", linetype = "dashed") +
+        ggtitle(names(resultsList)[counter])  +
+        theme_classic()
+
+    print(volcano)
+    ggsave(paste(paste("/projects/neuronet/neuronet/results/pdf/volcano", names(resultsList)[counter], sep ="-"), "pdf", sep = ".") ,plot = volcano, device = "pdf")
+
+    counter <- counter + 1
+}
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### Volcano plots without labels
+Scatterplot showing statistical significance [-log10(padj)] versus magnitude of change [log2FoldChange].
+```{r volcanoNoLabel, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 16, fig.align = "center"}
+counter <- 1
+
+resultsList <- list(
+    "trt3penVSctrl3pen" = trt3penVSctrl3pen,
+    "trt7penVSctrl7pen" = trt7penVSctrl7pen,
+    "trt7coreVSctrl7core" = trt7coreVSctrl7core,
+    "trt14penVSctrl14pen" = trt14penVSctrl14pen,
+    "ctrl7penVSctrl3pen" = ctrl7penVSctrl3pen,
+    "ctrl14penVSctrl3pen" = ctrl14penVSctrl3pen,
+    "ctrl14penVSctrl7pen" = ctrl14penVSctrl7pen,
+    "trt7penVStrt3pen" = trt7penVStrt3pen,
+    "trt14penVStrt3pen" = trt14penVStrt3pen,
+    "trt14penVStrt7pen" = trt14penVStrt7pen,
+    "sham3penVSctrl3pen" = sham3penVSctrl3pen,
+    "sham3penVStrt3pen" = sham3penVStrt3pen,
+    "sham3penVSctrl7pen" = sham3penVSctrl7pen,
+    "sham3penVStrt7pen" = sham3penVStrt7pen,
+    "sham3penVSctrl7core" = sham3penVSctrl7core,
+    "sham3penVStrt7core" = sham3penVStrt7core,
+    "sham3penVSctrl14pen" = sham3penVSctrl14pen,
+    "sham3penVStrt14pen" = sham3penVStrt14pen,
+    "ctrl7coreVSctrl7pen" = ctrl7coreVSctrl7pen,
+    "trt7coreVStrt7pen" = trt7coreVStrt7pen,
+    "timeInteraction" = timeInteraction,
+    "timeReduced" = timeReduced)
+
+lfcThreshold <- 0.9999
+padjThreshold <- 0.0005
+labelThreshold <- 0.995
+
+for(result in resultsList){
+    volcano <- as.data.frame(na.omit(result)) %>% dplyr::mutate(
+        significant = padj < 0.1, 
+        significant = ifelse(significant & log2FoldChange < 0, "Up", significant), 
+        significant = ifelse(significant == "TRUE" & log2FoldChange > 0, "Down", significant)
+        ) %>% dplyr::mutate(
+        outOfBoundsPadj = padj < quantile(padj, probs = padjThreshold), 
+        padj = ifelse(outOfBoundsPadj, quantile(padj, probs = padjThreshold), padj)
+        ) %>% dplyr::mutate(
+        outOfBoundsLFC = abs(log2FoldChange) > quantile(log2FoldChange, probs = lfcThreshold), 
+        log2FoldChange = ifelse(outOfBoundsLFC, quantile(log2FoldChange, probs = lfcThreshold) * sign(log2FoldChange), log2FoldChange)
+        ) %>% dplyr::mutate(
+        outOfBounds = ifelse(outOfBoundsPadj | outOfBoundsLFC, TRUE, FALSE)
+        ) %>%
+        ggplot(aes(x = log2FoldChange, y = -log10(padj), color = significant, shape = outOfBounds)) +
+        geom_point(size = 2, na.rm = TRUE) +
+        scale_color_manual(
+            "Significance",
+            values = c("#C77CFF", "grey80", "#F8766D"),
+            labels = c("sig Up", "no sig", "sig Down")) + 
+      xlim(quantile(result$log2FoldChange, probs = lfcThreshold)*-1+0.2,quantile(result$log2FoldChange, probs =lfcThreshold)) +
+        ylim(c(0, -log10(quantile(result$padj, probs = padjThreshold, digits = 20, na.rm = TRUE)))) +
+        geom_vline(xintercept = c(1, -1), col = "gray", linetype = "dashed") +
+        geom_hline(yintercept = -log10(.1), col = "gray", linetype = "dashed") +
+        ggtitle(names(resultsList)[counter])  +
+        theme_classic()
+
+    print(volcano)
+    ggsave(paste(paste("/projects/neuronet/neuronet/results/pdf/volcanoNoLabel", names(resultsList)[counter], sep ="-"), "pdf", sep = "."), plot = volcano, device = "pdf")
+
+    counter <- counter + 1
+}
+
+
+
+
+```
+<pre>
+
+
+
+
+</pre>
+## Heatmaps DGE
+### trt3penVSctrl3pen
+```{r heatmap_trt3penVSctrl3pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 16, fig.align = "center"}
+
+plotData1 <- assay(vst)[rownames(SIGtrt3penVSctrl3pen), samples[which(samples$group %in% c("ctrlday3ipsiPenumbra", "4Rxday3ipsiPenumbra")), "fileName"]]
+
+
+plotData1
+plotData1 <- plotData1 - rowMeans(plotData1)
+paletteLength <- 50
+myColor <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+myBreaks <- c(
+    seq(max(abs(plotData1))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(plotData1)) / paletteLength, max(abs(plotData1)), length.out = floor(paletteLength / 2)))
+
+
+pltNoSham <- pheatmap(
+  plotData1,
+  color = myColor,
+  breaks = myBreaks,
+  annotation_col = samples[which(samples$group %in% c("ctrlday3ipsiPenumbra", "4Rxday3ipsiPenumbra")), "condition", drop = FALSE],
+  annotation_colors = list(
+      condition = c(ctrl = "black", "4Rx" = "white")), 
+  show_colnames = FALSE,
+  cluster_cols = FALSE,
+  scale = "row", 
+  silent = TRUE, 
+  cellheight = 50, 
+  cellwidth = 50 )
+
+pltNoSham
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGenes-trt3penVSctrl3pen.pdf" ,plot = pltNoSham, device = "pdf")
+
+dev.off()
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### trt7penVSctrl7pen
+```{r heatmap_trt7penVSctrl7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+plotData1 <- assay(vst)[rownames(SIGtrt7penVSctrl7pen), samples[which(samples$group %in% c("ctrlday7ipsiPenumbra", "4Rxday7ipsiPenumbra")), "fileName"]]
+
+
+plotData1
+plotData1 <- plotData1 - rowMeans(plotData1)
+paletteLength <- 50
+myColor <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+myBreaks <- c(
+    seq(max(abs(plotData1))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(plotData1)) / paletteLength, max(abs(plotData1)), length.out = floor(paletteLength / 2)))
+
+
+pltNoSham <- pheatmap(
+  plotData1,
+  color = myColor,
+  breaks = myBreaks,
+  annotation_col = samples[which(samples$group %in% c("ctrlday7ipsiPenumbra", "4Rxday7ipsiPenumbra")), "condition", drop = FALSE],
+  annotation_colors = list(
+      condition = c(ctrl = "black", "4Rx" = "white")), 
+  show_colnames = FALSE,
+  cluster_cols = FALSE,
+  scale = "row", 
+  silent = TRUE, 
+  cellheight = 10, 
+  cellwidth = 10)
+
+pltNoSham
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGenes-trt7penVSctrl7pen.pdf" ,plot = pltNoSham, device = "pdf")
+
+dev.off()
+
+```
+<pre>
+
+
+
+
+</pre>
+<pre>
+
+
+
+
+</pre>
+### trt14penVSctrl14pen
+```{r heatmap_trt14penVSctrl14pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+plotData1 <- assay(vst)[rownames(SIGtrt14penVSctrl14pen), samples[which(samples$group %in% c("ctrlday14ipsiPenumbra", "4Rxday14ipsiPenumbra")), "fileName"]]
+
+
+plotData1
+plotData1 <- plotData1 - rowMeans(plotData1)
+paletteLength <- 50
+myColor <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+myBreaks <- c(
+    seq(max(abs(plotData1))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(plotData1)) / paletteLength, max(abs(plotData1)), length.out = floor(paletteLength / 2)))
+
+pltNoSham <- pheatmap(
+  plotData1,
+  color = myColor,
+  breaks = myBreaks,
+  annotation_col = samples[which(samples$group %in% c("ctrlday14ipsiPenumbra", "4Rxday14ipsiPenumbra")), "condition", drop = FALSE],
+  annotation_colors = list(
+      condition = c(ctrl = "black", "4Rx" = "white")), 
+  show_colnames = FALSE,
+  show_rownames = FALSE,
+  cluster_cols = FALSE,
+  scale = "row", 
+  silent = TRUE)
+
+pltNoSham
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGenes-trt14penVSctrl14pen.pdf" ,plot = pltNoSham, device = "pdf")
+
+dev.off()
+
+```
+<pre>
+
+
+
+
+</pre>
+## Chord Plots
+### trt3penVSctrl3pen
+```{r chord_trt3penVSctrl3pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+trt3penVSctrl3penGSEADfChord <- trt3penVSctrl3penGSEADf[which(trt3penVSctrl3penGSEADf$Description %in% trt3penVSctrl3penChord),]
+
+## setting up matrix containing all genes and pathways (membermatrix)
+trt3penVSctrl3penGSEADfChord <- trt3penVSctrl3penGSEADfChord[order(trt3penVSctrl3penGSEADfChord$NES, decreasing = TRUE), ]
+trt3penVSctrl3pen <- trt3penVSctrl3pen[order(trt3penVSctrl3pen$stat, decreasing = TRUE), ]
+
+pltPathway <- data.frame()
+pltPathway <- data.frame(Category = rep("BP", nrow(trt3penVSctrl3penGSEADfChord)), ID = trt3penVSctrl3penGSEADfChord$ID, Term = trt3penVSctrl3penGSEADfChord$Description, Genes = toupper(trt3penVSctrl3penGSEADfChord$core_enrichment), adj_pval = trt3penVSctrl3penGSEADfChord$p.adjust)
+pltPathway$Genes <- gsub("/", ",", pltPathway$Genes)
+
+pltGenes <- data.frame(ID = toupper(rownames(trt3penVSctrl3pen)), logFC = trt3penVSctrl3pen$log2FoldChange)
+
+pltCircle <- circle_dat(pltPathway, pltGenes)
+
+## defining a selection of pathways (top 3 up&down) and genes (top 500 wald up&down)
+
+pltPathwaySelection <- pltPathway
+pltGenesSelection <- data.frame()
+pltGenesSelection <- trt3penVSctrl3pen[which(toupper(rownames(trt3penVSctrl3pen)) %in% pltCircle$genes),]
+ 
+pltGenesSelection <- rbind(head(pltGenesSelection, n = 50)[1:40,], tail(pltGenesSelection, n = 50)[1:40,])
+pltGenesSelection <- data.frame(ID = toupper(rownames(pltGenesSelection)), logFC = pltGenesSelection$log2FoldChange)
+
+## a large number of genes for particular pathways
+#pltChord <- chord_dat(data = pltCircle, process = pltPathwaySelection$Term, genes = pltGenes)
+#GOChord(pltChord, space =0.01, gene.order = 'logFC', gene.space = 0.25, gene.size = 3)
+
+## plotting the chord diagram with the selected pathways and genes
+pltChordGenes <- chord_dat(data = pltCircle, genes = pltGenesSelection, process = pltPathwaySelection$Term)
+plotChord <- GOChord(pltChordGenes, space =0.02, gene.order = 'logFC', gene.space = 0.2, gene.size = 4, process.label = 12)
+
+plotChord
+ggsave("/projects/neuronet/neuronet/results/pdf/chord-trt3penVSctrl3pen.pdf" ,plot = plotChord, device = "pdf")
+```
+<pre>
+
+
+
+</pre>
+### trt7penVSctrl7pen
+```{r chord_trt7penVSctrl7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+trt7penVSctrl7penGSEADfChord <- trt7penVSctrl7penGSEADf[which(trt7penVSctrl7penGSEADf$Description %in% trt7penVSctrl7penSelection),]
+
+## setting up matrix containing all genes and pathways (membermatrix)
+trt7penVSctrl7penGSEADfChord <- trt7penVSctrl7penGSEADfChord[order(trt7penVSctrl7penGSEADfChord$NES, decreasing = TRUE), ]
+trt7penVSctrl7pen <- trt7penVSctrl7pen[order(trt7penVSctrl7pen$stat, decreasing = TRUE), ]
+
+pltPathway <- data.frame()
+pltPathway <- data.frame(Category = rep("BP", nrow(trt7penVSctrl7penGSEADfChord)), ID = trt7penVSctrl7penGSEADfChord$ID, Term = trt7penVSctrl7penGSEADfChord$Description, Genes = toupper(trt7penVSctrl7penGSEADfChord$core_enrichment), adj_pval = trt7penVSctrl7penGSEADfChord$p.adjust)
+pltPathway$Genes <- gsub("/", ",", pltPathway$Genes)
+
+pltGenes <- data.frame(ID = toupper(rownames(trt7penVSctrl7pen)), logFC = trt7penVSctrl7pen$log2FoldChange)
+
+pltCircle <- circle_dat(pltPathway, pltGenes)
+
+## defining a selection of pathways (top 3 up&down) and genes (top 500 wald up&down)
+
+pltPathwaySelection <- pltPathway
+pltGenesSelection <- data.frame()
+pltGenesSelection <- trt7penVSctrl7pen[which(toupper(rownames(trt7penVSctrl7pen)) %in% pltCircle$genes),]
+ 
+pltGenesSelection <- rbind(head(pltGenesSelection, n = 50)[1:40,], tail(pltGenesSelection, n = 50)[1:40,])
+pltGenesSelection <- data.frame(ID = toupper(rownames(pltGenesSelection)), logFC = pltGenesSelection$log2FoldChange)
+
+## a large number of genes for particular pathways
+#pltChord <- chord_dat(data = pltCircle, process = pltPathwaySelection$Term, genes = pltGenes)
+#GOChord(pltChord, space =0.01, gene.order = 'logFC', gene.space = 0.25, gene.size = 3)
+
+## plotting the chord diagram with the selected pathways and genes
+pltChordGenes <- chord_dat(data = pltCircle, genes = pltGenesSelection, process = pltPathwaySelection$Term)
+plotChord <- GOChord(pltChordGenes, space =0.02, gene.order = 'logFC', gene.space = 0.2, gene.size = 4, process.label = 12)
+plotChord
+ggsave("/projects/neuronet/neuronet/results/pdf/chord-trt7penVSctrl7pen.pdf" ,plot = plotChord, device = "pdf")
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### trt14penVSctrl14pen
+```{r chord_trt14penVSctrl14pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+trt14penVSctrl14penGSEADfChord <- trt14penVSctrl14penGSEADf[which(trt14penVSctrl14penGSEADf$Description %in% trt14penVSctrl14penChord),]
+
+## setting up matrix containing all genes and pathways (membermatrix)
+trt14penVSctrl14penGSEADfChord <- trt14penVSctrl14penGSEADfChord[order(trt14penVSctrl14penGSEADfChord$NES, decreasing = TRUE), ]
+trt14penVSctrl14pen <- trt14penVSctrl14pen[order(trt14penVSctrl14pen$stat, decreasing = TRUE), ]
+
+pltPathway <- data.frame()
+pltPathway <- data.frame(Category = rep("BP", nrow(trt14penVSctrl14penGSEADfChord)), ID = trt14penVSctrl14penGSEADfChord$ID, Term = trt14penVSctrl14penGSEADfChord$Description, Genes = toupper(trt14penVSctrl14penGSEADfChord$core_enrichment), adj_pval = trt14penVSctrl14penGSEADfChord$p.adjust)
+pltPathway$Genes <- gsub("/", ",", pltPathway$Genes)
+
+pltGenes <- data.frame(ID = toupper(rownames(trt14penVSctrl14pen)), logFC = trt14penVSctrl14pen$log2FoldChange)
+
+pltCircle <- circle_dat(pltPathway, pltGenes)
+
+## defining a selection of pathways (top 3 up&down) and genes (top 500 wald up&down)
+
+pltPathwaySelection <- pltPathway
+pltGenesSelection <- data.frame()
+pltGenesSelection <- trt14penVSctrl14pen[which(toupper(rownames(trt14penVSctrl14pen)) %in% pltCircle$genes),]
+ 
+pltGenesSelection <- rbind(head(pltGenesSelection, n = 50)[1:40,], tail(pltGenesSelection, n = 50)[1:40,])
+pltGenesSelection <- data.frame(ID = toupper(rownames(pltGenesSelection)), logFC = pltGenesSelection$log2FoldChange)
+
+## a large number of genes for particular pathways
+#pltChord <- chord_dat(data = pltCircle, process = pltPathwaySelection$Term, genes = pltGenes)
+#GOChord(pltChord, space =0.01, gene.order = 'logFC', gene.space = 0.25, gene.size = 3)
+
+## plotting the chord diagram with the selected pathways and genes
+pltChordGenes <- chord_dat(data = pltCircle, genes = pltGenesSelection, process = pltPathwaySelection$Term)
+plotChord <- GOChord(pltChordGenes, space =0.02, gene.order = 'logFC', gene.space = 0.2, gene.size = 4, process.label = 12)
+plotChord
+ggsave("/projects/neuronet/neuronet/results/pdf/chord-trt14penVSctrl14pen.pdf" ,plot = plotChord, device = "pdf")
+
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### trt7coreVStrt7pen
+```{r chord_trt7coreVStrt7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+trt7coreVStrt7penGSEADfChord <- trt7coreVStrt7penGSEADf[which(trt7coreVStrt7penGSEADf$Description %in% trt7coreVStrt7penChord),]
+
+## setting up matrix containing all genes and pathways (membermatrix)
+trt7coreVStrt7penGSEADfChord <- trt7coreVStrt7penGSEADfChord[order(trt7coreVStrt7penGSEADfChord$NES, decreasing = TRUE), ]
+trt7coreVStrt7pen <- trt7coreVStrt7pen[order(trt7coreVStrt7pen$stat, decreasing = TRUE), ]
+
+pltPathway <- data.frame()
+pltPathway <- data.frame(Category = rep("BP", nrow(trt7coreVStrt7penGSEADfChord)), ID = trt7coreVStrt7penGSEADfChord$ID, Term = trt7coreVStrt7penGSEADfChord$Description, Genes = toupper(trt7coreVStrt7penGSEADfChord$core_enrichment), adj_pval = trt7coreVStrt7penGSEADfChord$p.adjust)
+pltPathway$Genes <- gsub("/", ",", pltPathway$Genes)
+
+pltGenes <- data.frame(ID = toupper(rownames(trt7coreVStrt7pen)), logFC = trt7coreVStrt7pen$log2FoldChange)
+
+pltCircle <- circle_dat(pltPathway, pltGenes)
+
+## defining a selection of pathways (top 3 up&down) and genes (top 500 wald up&down)
+
+pltPathwaySelection <- pltPathway
+pltGenesSelection <- data.frame()
+pltGenesSelection <- trt7coreVStrt7pen[which(toupper(rownames(trt7coreVStrt7pen)) %in% pltCircle$genes),]
+ 
+pltGenesSelection <- rbind(head(pltGenesSelection, n = 50)[1:40,], tail(pltGenesSelection, n = 50)[1:40,])
+pltGenesSelection <- data.frame(ID = toupper(rownames(pltGenesSelection)), logFC = pltGenesSelection$log2FoldChange)
+
+## a large number of genes for particular pathways
+#pltChord <- chord_dat(data = pltCircle, process = pltPathwaySelection$Term, genes = pltGenes)
+#GOChord(pltChord, space =0.01, gene.order = 'logFC', gene.space = 0.25, gene.size = 3)
+
+## plotting the chord diagram with the selected pathways and genes
+pltChordGenes <- chord_dat(data = pltCircle, genes = pltGenesSelection, process = pltPathwaySelection$Term)
+plotChord <- GOChord(pltChordGenes, space =0.02, gene.order = 'logFC', gene.space = 0.2, gene.size = 4, process.label = 12)
+plotChord
+ggsave("/projects/neuronet/neuronet/results/pdf/chord-trt7coreVStrt7pen.pdf" ,plot = plotChord, device = "pdf")
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### trt7coreVSctrl7core
+```{r chord_trt7coreVSctrl7core, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+
+trt7coreVSctrl7coreGSEADfChord <- trt7coreVSctrl7coreGSEADf[which(trt7coreVSctrl7coreGSEADf$Description %in% trt7coreVSctrl7coreChord),]
+
+## setting up matrix containing all genes and pathways (membermatrix)
+trt7coreVSctrl7coreGSEADfChord <- trt7coreVSctrl7coreGSEADfChord[order(trt7coreVSctrl7coreGSEADfChord$NES, decreasing = TRUE), ]
+trt7coreVSctrl7core <- trt7coreVSctrl7core[order(trt7coreVSctrl7core$stat, decreasing = TRUE), ]
+
+pltPathway <- data.frame()
+pltPathway <- data.frame(Category = rep("BP", nrow(trt7coreVSctrl7coreGSEADfChord)), ID = trt7coreVSctrl7coreGSEADfChord$ID, Term = trt7coreVSctrl7coreGSEADfChord$Description, Genes = toupper(trt7coreVSctrl7coreGSEADfChord$core_enrichment), adj_pval = trt7coreVSctrl7coreGSEADfChord$p.adjust)
+pltPathway$Genes <- gsub("/", ",", pltPathway$Genes)
+
+pltGenes <- data.frame(ID = toupper(rownames(trt7coreVSctrl7core)), logFC = trt7coreVSctrl7core$log2FoldChange)
+
+pltCircle <- circle_dat(pltPathway, pltGenes)
+
+## defining a selection of pathways (top 3 up&down) and genes (top 500 wald up&down)
+
+pltPathwaySelection <- pltPathway
+pltGenesSelection <- data.frame()
+pltGenesSelection <- trt7coreVSctrl7core[which(toupper(rownames(trt7coreVSctrl7core)) %in% pltCircle$genes),]
+ 
+pltGenesSelection <- rbind(head(pltGenesSelection, n = 50)[1:40,], tail(pltGenesSelection, n = 50)[1:40,])
+pltGenesSelection <- data.frame(ID = toupper(rownames(pltGenesSelection)), logFC = pltGenesSelection$log2FoldChange)
+
+## a large number of genes for particular pathways
+#pltChord <- chord_dat(data = pltCircle, process = pltPathwaySelection$Term, genes = pltGenes)
+#GOChord(pltChord, space =0.01, gene.order = 'logFC', gene.space = 0.25, gene.size = 3)
+
+## plotting the chord diagram with the selected pathways and genes
+pltChordGenes <- chord_dat(data = pltCircle, genes = pltGenesSelection, process = pltPathwaySelection$Term)
+plotChord <- GOChord(pltChordGenes, space =0.02, gene.order = 'logFC', gene.space = 0.2, gene.size = 4, process.label = 12)
+
+
+plotChord
+ggsave("/projects/neuronet/neuronet/results/pdf/chord-trt7coreVSctrl7core.pdf" ,plot = plotChord, device = "pdf")
+
+
+```
+<pre>
+
+
+
+
+</pre>
+## Heatmaps GSEA
+### trt3penVSctrl3pen genes
+```{r heatmapGenes_trt3penVSctrl3pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 18, fig.align = "center"}
+trt3penVSctrl3pen <- trt3penVSctrl3pen[order(trt3penVSctrl3pen$stat, decreasing = TRUE),]
+
+geneSet1 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt3penVSctrl3penGSEA_inflammation[1]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt3penVSctrl3penGSEA_inflammation[2]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt3penVSctrl3penGSEA_inflammation[3]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt3penVSctrl3penGSEA_inflammation[4]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[1]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[2]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[3]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[4]$core_enrichment, "/")[[1]]
+
+GOI <- vector()
+
+geneSet1 <- head(rownames(trt3penVSctrl3pen[geneSet1, ]), n = 5)
+GOI <- append(GOI, geneSet1)
+geneSet2 <- geneSet2[!geneSet2 %in% GOI]
+geneSet2 <- head(rownames(trt3penVSctrl3pen[geneSet2, ]), n = 5)
+GOI <- append(GOI, geneSet2)
+geneSet3 <- geneSet3[!geneSet3 %in% GOI]
+geneSet3 <- head(rownames(trt3penVSctrl3pen[geneSet3, ]), n = 5)
+GOI <- append(GOI, geneSet3)
+geneSet4 <- geneSet4[!geneSet4 %in% GOI]
+geneSet4 <- head(rownames(trt3penVSctrl3pen[geneSet4, ]), n = 5)
+GOI <- append(GOI, geneSet4)
+
+geneSet5 <- geneSet5[!geneSet5 %in% GOI]
+geneSet5 <- tail(rownames(trt3penVSctrl3pen[geneSet5, ]), n = 5)
+GOI <- append(GOI, geneSet5)
+geneSet6 <- geneSet6[!geneSet6 %in% GOI]
+geneSet6 <- tail(rownames(trt3penVSctrl3pen[geneSet6, ]), n = 5)
+GOI <- append(GOI, geneSet6)
+geneSet7 <- geneSet7[!geneSet7 %in% GOI]
+geneSet7 <- tail(rownames(trt3penVSctrl3pen[geneSet7, ]), n = 5)
+GOI <- append(GOI, geneSet7)
+geneSet8 <- geneSet8[!geneSet8 %in% GOI]
+geneSet8 <- tail(rownames(trt3penVSctrl3pen[geneSet8, ]), n = 5)
+GOI <- append(GOI, geneSet8)
+
+geneSet9 <- geneSet9[!geneSet9 %in% GOI]
+geneSet9 <- tail(rownames(trt3penVSctrl3pen[geneSet9, ]), n = 5)
+GOI <- append(GOI, geneSet9)
+geneSet10 <- geneSet10[!geneSet10 %in% GOI]
+geneSet10 <- tail(rownames(trt3penVSctrl3pen[geneSet10, ]), n = 5)
+GOI <- append(GOI, geneSet10)
+geneSet11 <- geneSet11[!geneSet11 %in% GOI]
+geneSet11 <- tail(rownames(trt3penVSctrl3pen[geneSet11, ]), n = 5)
+GOI <- append(GOI, geneSet11)
+geneSet12 <- geneSet12[!geneSet12 %in% GOI]
+geneSet12 <- tail(rownames(trt3penVSctrl3pen[geneSet12, ]), n = 5)
+GOI <- append(GOI, geneSet12)
+
+duplicated(GOI)
+
+
+pltCounts <- assay(vst[GOI])
+pltCounts <- pltCounts - rowMeans(pltCounts)
+
+pltAnno <- data.frame (row.names = c(GOI), 
+    "GO" = c(
+    rep(paste(trt3penVSctrl3penGSEA_neuroplasticity[1]$Description, trt3penVSctrl3penGSEA_neuroplasticity[1]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_neuroplasticity[2]$Description, trt3penVSctrl3penGSEA_neuroplasticity[2]$ID, sep = ":"), 5),
+    rep(paste(trt3penVSctrl3penGSEA_neuroplasticity[3]$Description, trt3penVSctrl3penGSEA_neuroplasticity[3]$ID, sep = ":"), 5),
+    rep(paste(trt3penVSctrl3penGSEA_neuroplasticity[4]$Description, trt3penVSctrl3penGSEA_neuroplasticity[4]$ID, sep = ":"), 5),
+    rep(paste(trt3penVSctrl3penGSEA_inflammation[1]$Description, trt3penVSctrl3penGSEA_inflammation[1]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_inflammation[2]$Description, trt3penVSctrl3penGSEA_inflammation[2]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_inflammation[3]$Description, trt3penVSctrl3penGSEA_inflammation[3]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_inflammation[4]$Description, trt3penVSctrl3penGSEA_inflammation[4]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_angiogenesis[1]$Description, trt3penVSctrl3penGSEA_angiogenesis[1]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_angiogenesis[2]$Description, trt3penVSctrl3penGSEA_angiogenesis[2]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_angiogenesis[3]$Description, trt3penVSctrl3penGSEA_angiogenesis[3]$ID, sep = ":"), 5), 
+    rep(paste(trt3penVSctrl3penGSEA_angiogenesis[4]$Description, trt3penVSctrl3penGSEA_angiogenesis[4]$ID, sep = ":"), 5) 
+    ))
+
+
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltCounts,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         gaps_row= c(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55),
+         gaps_col= c(5, 10, 15, 20, 25, 30, 35, 39),
+         cellheight = 11,
+         cellwidth = 11,
+         border_color=NA,
+         fontsize_row = 6,
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         silent = TRUE)
+
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAgenes-trt3penVSctrl3pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre>
+### trt3penVSctrl3pen total
+```{r heatmapGOtotal_trt3penVSctrl3pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+geneSet1 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt3penVSctrl3penGSEA_neuroplasticity[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt3penVSctrl3penGSEA_inflammation[1]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt3penVSctrl3penGSEA_inflammation[2]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt3penVSctrl3penGSEA_inflammation[3]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt3penVSctrl3penGSEA_inflammation[4]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[1]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[2]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[3]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt3penVSctrl3penGSEA_angiogenesis[4]$core_enrichment, "/")[[1]]
+
+GOI_names <- c(
+trt3penVSctrl3penGSEA_neuroplasticity[1]$ID,
+trt3penVSctrl3penGSEA_neuroplasticity[2]$ID,
+trt3penVSctrl3penGSEA_neuroplasticity[3]$ID,
+trt3penVSctrl3penGSEA_neuroplasticity[4]$ID,
+trt3penVSctrl3penGSEA_inflammation[1]$ID,
+trt3penVSctrl3penGSEA_inflammation[2]$ID,
+trt3penVSctrl3penGSEA_inflammation[3]$ID,
+trt3penVSctrl3penGSEA_inflammation[4]$ID,
+trt3penVSctrl3penGSEA_angiogenesis[1]$ID,
+trt3penVSctrl3penGSEA_angiogenesis[2]$ID,
+trt3penVSctrl3penGSEA_angiogenesis[3]$ID,
+trt3penVSctrl3penGSEA_angiogenesis[4]$ID
+)
+
+GOI_objects <- list(geneSet1,
+geneSet2,
+geneSet3,
+geneSet4,
+geneSet5,
+geneSet6,
+geneSet7,
+geneSet8,
+geneSet9,
+geneSet10,
+geneSet11,
+geneSet12
+)
+
+pltData <- data.frame(row.names = samples$fileName)
+
+counter <- 1
+for (GOI in GOI_objects) {
+  GOI_counts <- assay(vst[GOI])  # Get counts for the current GOI
+  GOI_counts <- GOI_counts - rowMeans(GOI_counts)
+  GOI_counts <- colSums(GOI_counts)
+  pltData[GOI_names[counter]] <- GOI_counts
+  counter <- counter +1
+}
+
+pltData <- t(pltData)
+
+pltAnno <- data.frame (row.names = GOI_names, 
+    "GO" = c(
+    paste(trt3penVSctrl3penGSEA_neuroplasticity[1]$Description,GOI_names[1], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_neuroplasticity[2]$Description,GOI_names[2], sep = ":"),
+    paste(trt3penVSctrl3penGSEA_neuroplasticity[3]$Description,GOI_names[3], sep = ":"),
+    paste(trt3penVSctrl3penGSEA_neuroplasticity[4]$Description,GOI_names[4], sep = ":"),
+    paste(trt3penVSctrl3penGSEA_inflammation[1]$Description,GOI_names[5], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_inflammation[2]$Description,GOI_names[6], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_inflammation[3]$Description,GOI_names[7], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_inflammation[4]$Description,GOI_names[8], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_angiogenesis[1]$Description,GOI_names[9], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_angiogenesis[2]$Description,GOI_names[10], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_angiogenesis[3]$Description,GOI_names[11], sep = ":"), 
+    paste(trt3penVSctrl3penGSEA_angiogenesis[4]$Description,GOI_names[12], sep = ":") 
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+p1 <- pheatmap(pltData,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellheight = 50,
+         cellwidth = 10,
+         border_color=NA,
+         fontsize_row = 6,
+         gaps_row= c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+         gaps_col= c(5, 5, 10, 10, 15, 15, 20, 20, 25, 25, 30, 30, 35, 35, 39, 39),
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         show_rownames = FALSE,
+         silent = TRUE)
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAtotal-trt3penVSctrl3pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre> 
+### trt7penVSctrl7pen genes
+```{r heatmapGOgenes_trt7penVSctrl7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+trt7penVSctrl7pen <- trt7penVSctrl7pen[order(trt7penVSctrl7pen$stat, decreasing = TRUE),]
+
+geneSet1 <- strsplit(trt7penVSctrl7penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7penVSctrl7penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7penVSctrl7penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7penVSctrl7penGSEA_selection[4]$core_enrichment, "/")[[1]]
+
+
+GOI <- vector()
+
+geneSet1 <- tail(rownames(trt7penVSctrl7pen[geneSet1, ]), n = 5)
+GOI <- append(GOI, geneSet1)
+geneSet2 <- geneSet2[!geneSet2 %in% GOI]
+geneSet2 <- tail(rownames(trt7penVSctrl7pen[geneSet2, ]), n = 5)
+GOI <- append(GOI, geneSet2)
+geneSet3 <- geneSet3[!geneSet3 %in% GOI]
+geneSet3 <- tail(rownames(trt7penVSctrl7pen[geneSet3, ]), n = 5)
+GOI <- append(GOI, geneSet3)
+geneSet4 <- geneSet4[!geneSet4 %in% GOI]
+geneSet4 <- tail(rownames(trt7penVSctrl7pen[geneSet4, ]), n = 5)
+GOI <- append(GOI, geneSet4)
+
+duplicated(GOI)
+
+pltCounts <- assay(vst[GOI])
+pltCounts <- pltCounts - rowMeans(pltCounts)
+
+rownames(GOI)
+
+pltAnno <- data.frame (row.names = c(GOI), 
+    "GO" = c(
+    rep(paste(trt7penVSctrl7penGSEA_selection[1]$Description, trt7penVSctrl7penGSEA_selection[1]$ID, sep = ":"), 5), 
+    rep(paste(trt7penVSctrl7penGSEA_selection[2]$Description, trt7penVSctrl7penGSEA_selection[2]$ID, sep = ":"), 5),
+    rep(paste(trt7penVSctrl7penGSEA_selection[3]$Description, trt7penVSctrl7penGSEA_selection[3]$ID, sep = ":"), 5),
+    rep(paste(trt7penVSctrl7penGSEA_selection[4]$Description, trt7penVSctrl7penGSEA_selection[4]$ID, sep = ":"), 5)
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+p1 <- pheatmap(pltCounts,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         gaps_row= c(5, 10, 15),
+         gaps_col= c(5, 10, 15, 20, 25, 30, 35, 39),
+         cellheight = 15,
+         cellwidth = 15,
+         border_color=NA,
+         fontsize_row = 6,
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         silent = TRUE)
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAgenes-trt7penVSctrl7pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre>
+### trt7penVSctrl7pen total
+```{r heatmapGOtotal_trt7penVSctrl7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+geneSet1 <- strsplit(trt7penVSctrl7penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7penVSctrl7penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7penVSctrl7penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7penVSctrl7penGSEA_selection[4]$core_enrichment, "/")[[1]]
+
+
+GOI_names <- c(
+trt7penVSctrl7penGSEA_selection[1]$ID,
+trt7penVSctrl7penGSEA_selection[2]$ID,
+trt7penVSctrl7penGSEA_selection[3]$ID,
+trt7penVSctrl7penGSEA_selection[4]$ID
+)
+
+GOI_objects <- list(geneSet1,
+geneSet2,
+geneSet3,
+geneSet4
+)
+
+pltData <- data.frame(row.names = samples$fileName)
+
+counter <- 1
+for (GOI in GOI_objects) {
+  GOI_counts <- assay(vst[GOI])  # Get counts for the current GOI
+  GOI_counts <- GOI_counts - rowMeans(GOI_counts)
+  GOI_counts <- colSums(GOI_counts)
+  pltData[GOI_names[counter]] <- GOI_counts
+  counter <- counter +1
+}
+
+pltData <- t(pltData)
+
+pltAnno <- data.frame (row.names = GOI_names, 
+    "GO" = c(
+    paste(trt7penVSctrl7penGSEA_selection[1]$Description,GOI_names[1], sep = ":"), 
+    paste(trt7penVSctrl7penGSEA_selection[2]$Description,GOI_names[2], sep = ":"),
+    paste(trt7penVSctrl7penGSEA_selection[3]$Description,GOI_names[3], sep = ":"),
+    paste(trt7penVSctrl7penGSEA_selection[4]$Description,GOI_names[4], sep = ":")
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+p1 <- pheatmap(pltData,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellheight = 50,
+         cellwidth = 10,
+         border_color=NA,
+         fontsize_row = 6,
+         gaps_row= c(1, 2, 3),
+         gaps_col= c(5, 5, 10, 10, 15, 15, 20, 20, 25, 25, 30, 30, 35, 35, 39, 39),
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         show_rownames = FALSE,
+         silent = TRUE)
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAtotal-trt7penVSctrl7pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+
+<pre>
+### trt14penVSctrl14pen genes
+```{r heatmapGenes_trt14penVSctrl14pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 18, fig.align = "center"}
+trt14penVSctrl14pen <- trt14penVSctrl14pen[order(trt14penVSctrl14pen$stat, decreasing = TRUE),]
+
+geneSet1 <- strsplit(trt14penVSctrl14penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt14penVSctrl14penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt14penVSctrl14penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt14penVSctrl14penGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt14penVSctrl14penGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt14penVSctrl14penGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt14penVSctrl14penGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt14penVSctrl14penGSEA_selection[8]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt14penVSctrl14penGSEA_selection[9]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt14penVSctrl14penGSEA_selection[10]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt14penVSctrl14penGSEA_selection[11]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt14penVSctrl14penGSEA_selection[12]$core_enrichment, "/")[[1]]
+geneSet13 <- strsplit(trt14penVSctrl14penGSEA_selection[13]$core_enrichment, "/")[[1]]
+
+GOI <- vector()
+
+geneSet1 <- tail(rownames(trt14penVSctrl14pen[geneSet1, ]), n = 5)
+GOI <- append(GOI, geneSet1)
+geneSet2 <- geneSet2[!geneSet2 %in% GOI]
+geneSet2 <- tail(rownames(trt14penVSctrl14pen[geneSet2, ]), n = 5)
+GOI <- append(GOI, geneSet2)
+geneSet3 <- geneSet3[!geneSet3 %in% GOI]
+geneSet3 <- tail(rownames(trt14penVSctrl14pen[geneSet3, ]), n = 5)
+GOI <- append(GOI, geneSet3)
+geneSet4 <- geneSet4[!geneSet4 %in% GOI]
+geneSet4 <- tail(rownames(trt14penVSctrl14pen[geneSet4, ]), n = 5)
+GOI <- append(GOI, geneSet4)
+
+geneSet5 <- geneSet5[!geneSet5 %in% GOI]
+geneSet5 <- tail(rownames(trt14penVSctrl14pen[geneSet5, ]), n = 5)
+GOI <- append(GOI, geneSet5)
+geneSet6 <- geneSet6[!geneSet6 %in% GOI]
+geneSet6 <- tail(rownames(trt14penVSctrl14pen[geneSet6, ]), n = 5)
+GOI <- append(GOI, geneSet6)
+geneSet7 <- geneSet7[!geneSet7 %in% GOI]
+geneSet7 <- tail(rownames(trt14penVSctrl14pen[geneSet7, ]), n = 5)
+GOI <- append(GOI, geneSet7)
+geneSet8 <- geneSet8[!geneSet8 %in% GOI]
+geneSet8 <- head(rownames(trt14penVSctrl14pen[geneSet8, ]), n = 5)
+GOI <- append(GOI, geneSet8)
+
+geneSet9 <- geneSet9[!geneSet9 %in% GOI]
+geneSet9 <- head(rownames(trt14penVSctrl14pen[geneSet9, ]), n = 5)
+GOI <- append(GOI, geneSet9)
+geneSet10 <- geneSet10[!geneSet10 %in% GOI]
+geneSet10 <- head(rownames(trt14penVSctrl14pen[geneSet10, ]), n = 5)
+GOI <- append(GOI, geneSet10)
+geneSet11 <- geneSet11[!geneSet11 %in% GOI]
+geneSet11 <- head(rownames(trt14penVSctrl14pen[geneSet11, ]), n = 5)
+GOI <- append(GOI, geneSet11)
+geneSet12 <- geneSet12[!geneSet12 %in% GOI]
+geneSet12 <- head(rownames(trt14penVSctrl14pen[geneSet12, ]), n = 5)
+GOI <- append(GOI, geneSet12)
+
+geneSet13 <- geneSet13[!geneSet13 %in% GOI]
+geneSet13 <- head(rownames(trt14penVSctrl14pen[geneSet13, ]), n = 5)
+GOI <- append(GOI, geneSet13)
+
+duplicated(GOI)
+
+
+pltCounts <- assay(vst[GOI])
+pltCounts <- pltCounts - rowMeans(pltCounts)
+
+pltAnno <- data.frame (row.names = c(GOI), 
+    "GO" = c(
+    rep(paste(trt14penVSctrl14penGSEA_selection[1]$Description, trt14penVSctrl14penGSEA_selection[1]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[2]$Description, trt14penVSctrl14penGSEA_selection[2]$ID, sep = ":"), 5),
+    rep(paste(trt14penVSctrl14penGSEA_selection[3]$Description, trt14penVSctrl14penGSEA_selection[3]$ID, sep = ":"), 5),
+    rep(paste(trt14penVSctrl14penGSEA_selection[4]$Description, trt14penVSctrl14penGSEA_selection[4]$ID, sep = ":"), 5),
+    rep(paste(trt14penVSctrl14penGSEA_selection[5]$Description, trt14penVSctrl14penGSEA_selection[5]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[6]$Description, trt14penVSctrl14penGSEA_selection[6]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[7]$Description, trt14penVSctrl14penGSEA_selection[7]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[8]$Description, trt14penVSctrl14penGSEA_selection[8]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[9]$Description, trt14penVSctrl14penGSEA_selection[9]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[10]$Description, trt14penVSctrl14penGSEA_selection[10]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[11]$Description, trt14penVSctrl14penGSEA_selection[11]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[12]$Description, trt14penVSctrl14penGSEA_selection[12]$ID, sep = ":"), 5), 
+    rep(paste(trt14penVSctrl14penGSEA_selection[13]$Description, trt14penVSctrl14penGSEA_selection[13]$ID, sep = ":"), 5) 
+    ))
+
+
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltCounts,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         gaps_row= c(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55),
+         gaps_col= c(5, 10, 15, 20, 25, 30, 35, 39),
+         cellheight = 11,
+         cellwidth = 11,
+         border_color=NA,
+         fontsize_row = 6,
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         silent = TRUE)
+
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAgenes-trt14penVSctrl14pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre>
+### trt14penVSctrl14pen total
+```{r heatmapGOtotal_trt14penVSctrl14pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+geneSet1 <- strsplit(trt14penVSctrl14penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt14penVSctrl14penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt14penVSctrl14penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt14penVSctrl14penGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt14penVSctrl14penGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt14penVSctrl14penGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt14penVSctrl14penGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt14penVSctrl14penGSEA_selection[8]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt14penVSctrl14penGSEA_selection[9]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt14penVSctrl14penGSEA_selection[10]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt14penVSctrl14penGSEA_selection[11]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt14penVSctrl14penGSEA_selection[12]$core_enrichment, "/")[[1]]
+geneSet13 <- strsplit(trt14penVSctrl14penGSEA_selection[13]$core_enrichment, "/")[[1]]
+
+GOI_objects <- list(geneSet1,
+geneSet2,
+geneSet3,
+geneSet4,
+geneSet5,
+geneSet6,
+geneSet7,
+geneSet8,
+geneSet9,
+geneSet10,
+geneSet11,
+geneSet12, 
+geneSet13
+)
+
+
+pltData <- data.frame(row.names = samples$fileName)
+
+counter <- 1
+for (GOI in GOI_objects) {
+  GOI_counts <- assay(vst[GOI])  # Get counts for the current GOI
+  GOI_counts <- GOI_counts - rowMeans(GOI_counts)
+  GOI_counts <- colSums(GOI_counts)
+  pltData[trt14penVSctrl14penGSEA_selection[counter]$ID] <- GOI_counts
+  counter <- counter +1
+}
+pltData <- t(pltData)
+
+pltAnno <- data.frame (row.names = trt14penVSctrl14penGSEA_selection$ID, 
+    "GO" = c(
+    paste(trt14penVSctrl14penGSEA_selection[1]$Description, trt14penVSctrl14penGSEA_selection[1]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[2]$Description, trt14penVSctrl14penGSEA_selection[2]$ID, sep = ":"),
+    paste(trt14penVSctrl14penGSEA_selection[3]$Description, trt14penVSctrl14penGSEA_selection[3]$ID, sep = ":"),
+    paste(trt14penVSctrl14penGSEA_selection[4]$Description, trt14penVSctrl14penGSEA_selection[4]$ID, sep = ":"),
+    paste(trt14penVSctrl14penGSEA_selection[5]$Description, trt14penVSctrl14penGSEA_selection[5]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[6]$Description, trt14penVSctrl14penGSEA_selection[6]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[7]$Description, trt14penVSctrl14penGSEA_selection[7]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[8]$Description, trt14penVSctrl14penGSEA_selection[8]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[9]$Description, trt14penVSctrl14penGSEA_selection[9]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[10]$Description, trt14penVSctrl14penGSEA_selection[10]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[11]$Description, trt14penVSctrl14penGSEA_selection[11]$ID, sep = ":"), 
+    paste(trt14penVSctrl14penGSEA_selection[12]$Description, trt14penVSctrl14penGSEA_selection[12]$ID, sep = ":"),
+    paste(trt14penVSctrl14penGSEA_selection[13]$Description, trt14penVSctrl14penGSEA_selection[13]$ID, sep = ":") 
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltData,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellheight = 50,
+         cellwidth = 10,
+         border_color=NA,
+         fontsize_row = 6,
+         gaps_row= c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+         gaps_col= c(5, 5, 10, 10, 15, 15, 20, 20, 25, 25, 30, 30, 35, 35, 39, 39),
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         show_rownames = FALSE,
+         silent = TRUE)
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAtotal-trt14penVSctrl14pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+
+<pre>
+### trt7coreVStrt7pen genes
+```{r heatmapGenes_trt7coreVStrt7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 18, fig.align = "center"}
+trt7coreVStrt7pen <- trt7coreVStrt7pen[order(trt7coreVStrt7pen$stat, decreasing = TRUE),]
+
+geneSet1 <- strsplit(trt7coreVStrt7penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7coreVStrt7penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7coreVStrt7penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7coreVStrt7penGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt7coreVStrt7penGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt7coreVStrt7penGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt7coreVStrt7penGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt7coreVStrt7penGSEA_selection[8]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt7coreVStrt7penGSEA_selection[9]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt7coreVStrt7penGSEA_selection[10]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt7coreVStrt7penGSEA_selection[11]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt7coreVStrt7penGSEA_selection[12]$core_enrichment, "/")[[1]]
+geneSet13 <- strsplit(trt7coreVStrt7penGSEA_selection[13]$core_enrichment, "/")[[1]]
+
+GOI <- vector()
+
+geneSet1 <- tail(rownames(trt7coreVStrt7pen[geneSet1, ]), n = 5)
+GOI <- append(GOI, geneSet1)
+geneSet2 <- geneSet2[!geneSet2 %in% GOI]
+geneSet2 <- tail(rownames(trt7coreVStrt7pen[geneSet2, ]), n = 5)
+GOI <- append(GOI, geneSet2)
+geneSet3 <- geneSet3[!geneSet3 %in% GOI]
+geneSet3 <- head(rownames(trt7coreVStrt7pen[geneSet3, ]), n = 5)
+GOI <- append(GOI, geneSet3)
+geneSet4 <- geneSet4[!geneSet4 %in% GOI]
+geneSet4 <- head(rownames(trt7coreVStrt7pen[geneSet4, ]), n = 5)
+GOI <- append(GOI, geneSet4)
+
+geneSet5 <- geneSet5[!geneSet5 %in% GOI]
+geneSet5 <- head(rownames(trt7coreVStrt7pen[geneSet5, ]), n = 5)
+GOI <- append(GOI, geneSet5)
+geneSet6 <- geneSet6[!geneSet6 %in% GOI]
+geneSet6 <- head(rownames(trt7coreVStrt7pen[geneSet6, ]), n = 5)
+GOI <- append(GOI, geneSet6)
+geneSet7 <- geneSet7[!geneSet7 %in% GOI]
+geneSet7 <- head(rownames(trt7coreVStrt7pen[geneSet7, ]), n = 5)
+GOI <- append(GOI, geneSet7)
+geneSet8 <- geneSet8[!geneSet8 %in% GOI]
+geneSet8 <- head(rownames(trt7coreVStrt7pen[geneSet8, ]), n = 5)
+GOI <- append(GOI, geneSet8)
+
+geneSet9 <- geneSet9[!geneSet9 %in% GOI]
+geneSet9 <- tail(rownames(trt7coreVStrt7pen[geneSet9, ]), n = 5)
+GOI <- append(GOI, geneSet9)
+geneSet10 <- geneSet10[!geneSet10 %in% GOI]
+geneSet10 <- head(rownames(trt7coreVStrt7pen[geneSet10, ]), n = 5)
+GOI <- append(GOI, geneSet10)
+geneSet11 <- geneSet11[!geneSet11 %in% GOI]
+geneSet11 <- tail(rownames(trt7coreVStrt7pen[geneSet11, ]), n = 5)
+GOI <- append(GOI, geneSet11)
+geneSet12 <- geneSet12[!geneSet12 %in% GOI]
+geneSet12 <- tail(rownames(trt7coreVStrt7pen[geneSet12, ]), n = 5)
+GOI <- append(GOI, geneSet12)
+
+geneSet13 <- geneSet13[!geneSet13 %in% GOI]
+geneSet13 <- tail(rownames(trt7coreVStrt7pen[geneSet13, ]), n = 5)
+GOI <- append(GOI, geneSet13)
+
+duplicated(GOI)
+
+
+pltCounts <- assay(vst[GOI])
+pltCounts <- pltCounts - rowMeans(pltCounts)
+
+pltAnno <- data.frame (row.names = c(GOI), 
+    "GO" = c(
+    rep(paste(trt7coreVStrt7penGSEA_selection[1]$Description, trt7coreVStrt7penGSEA_selection[1]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[2]$Description, trt7coreVStrt7penGSEA_selection[2]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVStrt7penGSEA_selection[3]$Description, trt7coreVStrt7penGSEA_selection[3]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVStrt7penGSEA_selection[4]$Description, trt7coreVStrt7penGSEA_selection[4]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVStrt7penGSEA_selection[5]$Description, trt7coreVStrt7penGSEA_selection[5]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[6]$Description, trt7coreVStrt7penGSEA_selection[6]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[7]$Description, trt7coreVStrt7penGSEA_selection[7]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[8]$Description, trt7coreVStrt7penGSEA_selection[8]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[9]$Description, trt7coreVStrt7penGSEA_selection[9]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[10]$Description, trt7coreVStrt7penGSEA_selection[10]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[11]$Description, trt7coreVStrt7penGSEA_selection[11]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[12]$Description, trt7coreVStrt7penGSEA_selection[12]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVStrt7penGSEA_selection[13]$Description, trt7coreVStrt7penGSEA_selection[13]$ID, sep = ":"), 5) 
+    ))
+
+
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltCounts,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         gaps_row= c(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55),
+         gaps_col= c(5, 10, 15, 20, 25, 30, 35, 39),
+         cellheight = 11,
+         cellwidth = 11,
+         border_color=NA,
+         fontsize_row = 6,
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         silent = TRUE)
+
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAgenes-trt7coreVStrt7pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre>
+### trt7coreVStrt7pen total
+```{r heatmapGOtotal_trt7coreVStrt7pen, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+geneSet1 <- strsplit(trt7coreVStrt7penGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7coreVStrt7penGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7coreVStrt7penGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7coreVStrt7penGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt7coreVStrt7penGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt7coreVStrt7penGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt7coreVStrt7penGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt7coreVStrt7penGSEA_selection[8]$core_enrichment, "/")[[1]]
+geneSet9 <- strsplit(trt7coreVStrt7penGSEA_selection[9]$core_enrichment, "/")[[1]]
+geneSet10 <- strsplit(trt7coreVStrt7penGSEA_selection[10]$core_enrichment, "/")[[1]]
+geneSet11 <- strsplit(trt7coreVStrt7penGSEA_selection[11]$core_enrichment, "/")[[1]]
+geneSet12 <- strsplit(trt7coreVStrt7penGSEA_selection[12]$core_enrichment, "/")[[1]]
+geneSet13 <- strsplit(trt7coreVStrt7penGSEA_selection[13]$core_enrichment, "/")[[1]]
+
+GOI_objects <- list(geneSet1,
+geneSet2,
+geneSet3,
+geneSet4,
+geneSet5,
+geneSet6,
+geneSet7,
+geneSet8,
+geneSet9,
+geneSet10,
+geneSet11,
+geneSet12, 
+geneSet13
+)
+
+
+pltData <- data.frame(row.names = samples$fileName)
+
+counter <- 1
+for (GOI in GOI_objects) {
+  GOI_counts <- assay(vst[GOI])  # Get counts for the current GOI
+  GOI_counts <- GOI_counts - rowMeans(GOI_counts)
+  GOI_counts <- colSums(GOI_counts)
+  pltData[trt7coreVStrt7penGSEA_selection[counter]$ID] <- GOI_counts
+  counter <- counter +1
+}
+pltData <- t(pltData)
+
+pltAnno <- data.frame (row.names = trt7coreVStrt7penGSEA_selection$ID, 
+    "GO" = c(
+    paste(trt7coreVStrt7penGSEA_selection[1]$Description, trt7coreVStrt7penGSEA_selection[1]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[2]$Description, trt7coreVStrt7penGSEA_selection[2]$ID, sep = ":"),
+    paste(trt7coreVStrt7penGSEA_selection[3]$Description, trt7coreVStrt7penGSEA_selection[3]$ID, sep = ":"),
+    paste(trt7coreVStrt7penGSEA_selection[4]$Description, trt7coreVStrt7penGSEA_selection[4]$ID, sep = ":"),
+    paste(trt7coreVStrt7penGSEA_selection[5]$Description, trt7coreVStrt7penGSEA_selection[5]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[6]$Description, trt7coreVStrt7penGSEA_selection[6]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[7]$Description, trt7coreVStrt7penGSEA_selection[7]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[8]$Description, trt7coreVStrt7penGSEA_selection[8]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[9]$Description, trt7coreVStrt7penGSEA_selection[9]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[10]$Description, trt7coreVStrt7penGSEA_selection[10]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[11]$Description, trt7coreVStrt7penGSEA_selection[11]$ID, sep = ":"), 
+    paste(trt7coreVStrt7penGSEA_selection[12]$Description, trt7coreVStrt7penGSEA_selection[12]$ID, sep = ":"),
+    paste(trt7coreVStrt7penGSEA_selection[13]$Description, trt7coreVStrt7penGSEA_selection[13]$ID, sep = ":") 
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltData,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellheight = 50,
+         cellwidth = 10,
+         border_color=NA,
+         fontsize_row = 6,
+         gaps_row= c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+         gaps_col= c(5, 5, 10, 10, 15, 15, 20, 20, 25, 25, 30, 30, 35, 35, 39, 39),
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         show_rownames = FALSE,
+         silent = TRUE)
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAtotal-trt7coreVStrt7pen.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+
+<pre>
+### trt7coreVSctrl7core genes
+```{r heatmapGenes_trt7coreVSctrl7core, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 18, fig.align = "center"}
+trt7coreVSctrl7core <- trt7coreVSctrl7core[order(trt7coreVSctrl7core$stat, decreasing = TRUE),]
+
+geneSet1 <- strsplit(trt7coreVSctrl7coreGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7coreVSctrl7coreGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7coreVSctrl7coreGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7coreVSctrl7coreGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt7coreVSctrl7coreGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt7coreVSctrl7coreGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt7coreVSctrl7coreGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt7coreVSctrl7coreGSEA_selection[8]$core_enrichment, "/")[[1]]
+
+GOI <- vector()
+
+geneSet1 <- head(rownames(trt7coreVSctrl7core[geneSet1, ]), n = 5)
+GOI <- append(GOI, geneSet1)
+geneSet2 <- geneSet2[!geneSet2 %in% GOI]
+geneSet2 <- head(rownames(trt7coreVSctrl7core[geneSet2, ]), n = 5)
+GOI <- append(GOI, geneSet2)
+geneSet3 <- geneSet3[!geneSet3 %in% GOI]
+geneSet3 <- head(rownames(trt7coreVSctrl7core[geneSet3, ]), n = 5)
+GOI <- append(GOI, geneSet3)
+geneSet4 <- geneSet4[!geneSet4 %in% GOI]
+geneSet4 <- tail(rownames(trt7coreVSctrl7core[geneSet4, ]), n = 5)
+GOI <- append(GOI, geneSet4)
+
+geneSet5 <- geneSet5[!geneSet5 %in% GOI]
+geneSet5 <- head(rownames(trt7coreVSctrl7core[geneSet5, ]), n = 5)
+GOI <- append(GOI, geneSet5)
+geneSet6 <- geneSet6[!geneSet6 %in% GOI]
+geneSet6 <- head(rownames(trt7coreVSctrl7core[geneSet6, ]), n = 5)
+GOI <- append(GOI, geneSet6)
+geneSet7 <- geneSet7[!geneSet7 %in% GOI]
+geneSet7 <- head(rownames(trt7coreVSctrl7core[geneSet7, ]), n = 5)
+GOI <- append(GOI, geneSet7)
+geneSet8 <- geneSet8[!geneSet8 %in% GOI]
+geneSet8 <- head(rownames(trt7coreVSctrl7core[geneSet8, ]), n = 5)
+GOI <- append(GOI, geneSet8)
+
+
+duplicated(GOI)
+
+
+pltCounts <- assay(vst[GOI])
+pltCounts <- pltCounts - rowMeans(pltCounts)
+
+pltAnno <- data.frame (row.names = c(GOI), 
+    "GO" = c(
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[1]$Description, trt7coreVSctrl7coreGSEA_selection[1]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[2]$Description, trt7coreVSctrl7coreGSEA_selection[2]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[3]$Description, trt7coreVSctrl7coreGSEA_selection[3]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[4]$Description, trt7coreVSctrl7coreGSEA_selection[4]$ID, sep = ":"), 5),
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[5]$Description, trt7coreVSctrl7coreGSEA_selection[5]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[6]$Description, trt7coreVSctrl7coreGSEA_selection[6]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[7]$Description, trt7coreVSctrl7coreGSEA_selection[7]$ID, sep = ":"), 5), 
+    rep(paste(trt7coreVSctrl7coreGSEA_selection[8]$Description, trt7coreVSctrl7coreGSEA_selection[8]$ID, sep = ":"), 5)
+    ))
+
+
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltCounts,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         gaps_row= c(5, 10, 15, 20, 25, 30, 35),
+         gaps_col= c(5, 10, 15, 20, 25, 30, 35, 39),
+         cellheight = 11,
+         cellwidth = 11,
+         border_color=NA,
+         fontsize_row = 6,
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         silent = TRUE)
+
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAgenes-trt7coreVSctrl7core.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+</pre>
+### trt7coreVSctrl7core total
+```{r heatmapGOtotal_trt7coreVSctrl7core, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 22, fig.align = "center"}
+geneSet1 <- strsplit(trt7coreVSctrl7coreGSEA_selection[1]$core_enrichment, "/")[[1]]
+geneSet2 <- strsplit(trt7coreVSctrl7coreGSEA_selection[2]$core_enrichment, "/")[[1]]
+geneSet3 <- strsplit(trt7coreVSctrl7coreGSEA_selection[3]$core_enrichment, "/")[[1]]
+geneSet4 <- strsplit(trt7coreVSctrl7coreGSEA_selection[4]$core_enrichment, "/")[[1]]
+geneSet5 <- strsplit(trt7coreVSctrl7coreGSEA_selection[5]$core_enrichment, "/")[[1]]
+geneSet6 <- strsplit(trt7coreVSctrl7coreGSEA_selection[6]$core_enrichment, "/")[[1]]
+geneSet7 <- strsplit(trt7coreVSctrl7coreGSEA_selection[7]$core_enrichment, "/")[[1]]
+geneSet8 <- strsplit(trt7coreVSctrl7coreGSEA_selection[8]$core_enrichment, "/")[[1]]
+
+
+GOI_objects <- list(geneSet1,
+geneSet2,
+geneSet3,
+geneSet4,
+geneSet5,
+geneSet6,
+geneSet7,
+geneSet8
+)
+
+
+pltData <- data.frame(row.names = samples$fileName)
+
+counter <- 1
+for (GOI in GOI_objects) {
+  GOI_counts <- assay(vst[GOI])  # Get counts for the current GOI
+  GOI_counts <- GOI_counts - rowMeans(GOI_counts)
+  GOI_counts <- colSums(GOI_counts)
+  pltData[trt7coreVSctrl7coreGSEA_selection[counter]$ID] <- GOI_counts
+  counter <- counter +1
+}
+pltData <- t(pltData)
+
+pltAnno <- data.frame (row.names = trt7coreVSctrl7coreGSEA_selection$ID, 
+    "GO" = c(
+    paste(trt7coreVSctrl7coreGSEA_selection[1]$Description, trt7coreVSctrl7coreGSEA_selection[1]$ID, sep = ":"), 
+    paste(trt7coreVSctrl7coreGSEA_selection[2]$Description, trt7coreVSctrl7coreGSEA_selection[2]$ID, sep = ":"),
+    paste(trt7coreVSctrl7coreGSEA_selection[3]$Description, trt7coreVSctrl7coreGSEA_selection[3]$ID, sep = ":"),
+    paste(trt7coreVSctrl7coreGSEA_selection[4]$Description, trt7coreVSctrl7coreGSEA_selection[4]$ID, sep = ":"),
+    paste(trt7coreVSctrl7coreGSEA_selection[5]$Description, trt7coreVSctrl7coreGSEA_selection[5]$ID, sep = ":"), 
+    paste(trt7coreVSctrl7coreGSEA_selection[6]$Description, trt7coreVSctrl7coreGSEA_selection[6]$ID, sep = ":"), 
+    paste(trt7coreVSctrl7coreGSEA_selection[7]$Description, trt7coreVSctrl7coreGSEA_selection[7]$ID, sep = ":"), 
+    paste(trt7coreVSctrl7coreGSEA_selection[8]$Description, trt7coreVSctrl7coreGSEA_selection[8]$ID, sep = ":")
+    ))
+
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pltAnno$GO))))
+mycolors <- newCols(length(unique(pltAnno$GO)))
+names(mycolors) <- unique(pltAnno$GO)
+mycolors <- list(GO = mycolors)
+
+
+paletteLength <- 50
+heatColors <- colorRampPalette(c("#000099", "white", "#990000"))(paletteLength)
+heatBreaks <- c(
+    seq(max(abs(pltCounts))*-1, 0, length.out = ceiling(paletteLength / 2) + 1),
+    seq(max(abs(pltCounts)) / paletteLength, max(abs(pltCounts)), length.out = floor(paletteLength / 2)))
+
+
+
+p1 <- pheatmap(pltData,
+         color=heatColors,
+         breaks = heatBreaks,
+         scale="row",
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellheight = 50,
+         cellwidth = 10,
+         border_color=NA,
+         fontsize_row = 6,
+         gaps_row= c(1, 2, 3, 4, 5, 6, 7),
+         gaps_col= c(5, 5, 10, 10, 15, 15, 20, 20, 25, 25, 30, 30, 35, 35, 39, 39),
+         main="Genes grouped by GO",
+         annotation_row = pltAnno,
+         annotation_colors = mycolors, 
+         annotation_col = samples[, c("condition", "timeAfterStroke", "brainRegion"), drop = FALSE], 
+         show_rownames = FALSE,
+         silent = TRUE)
+
+p1
+ggsave("/projects/neuronet/neuronet/results/pdf/heatmapGSEAtotal-trt7coreVSctrl7core.pdf" ,plot = p1, device = "pdf")
+
+dev.off()
+```
+<pre>
+
+
+
+
+</pre>
+## Trajectory analysis
+### The trajectories of all significant genes clustered elbowplot
+```{r timeconditionInteractionClusteringSIGElbow, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 8, fig.align = "center"}
+## tscR, mfuzz, TMixClust DID NOT WORK FOR ME
+
+## how about classical k-means clustering 
+# https://www.r-bloggers.com/2019/10/cluster-multiple-time-series-using-k-means-2/ 
+
+## ON MY TIME INTERACTION DATA significant results rlog transformed
+pltData <- data.frame(t(assay(rlogTime)[rownames(SIGtimeInteraction),]))
+pltData$timepoint <- samplesTime$timepoint
+pltData$condition <- samplesTime$condition
+pltData$group <- samplesTime$group
+
+pltData <- melt(pltData, id.vars = c("timepoint", "condition", "group"))
+pltMeans <- aggregate(pltData$value, list(pltData$group, pltData$variable), FUN = mean)
+pltData <- merge(pltData, pltMeans, by.x = c("group", "variable"), by.y = c("Group.1", "Group.2"))
+names(pltData) <- c("group", "variable", "timepoint", "condition", "value", "means")
+pltData$timepoint <- factor(pltData$timepoint, levels = c("day3", "day7", "day14"))
+pltData <- arrange(pltData, variable, timepoint)
+
+# spreading my data
+clstrData <- unique(pltData[,c("variable", "condition", "timepoint", "means")])
+clstrData$timeCond <- paste(clstrData$timepoint, clstrData$condition, sep = "-")
+clstrData$condition <- NULL; clstrData$timepoint <- NULL
+
+clstrData <- data.frame(t(spread(clstrData, variable, means)))
+colnames(clstrData) <- clstrData[1,]
+clstrData <- clstrData[-c(1),]
+clstrData <- mutate_all(clstrData, function(x) as.numeric(as.character(x)))
+clstrData <- clstrData - rowMeans(clstrData)
+clstrData <- clstrData[, c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx")]
+
+head(clstrData)
+
+# how many clusters would make sense
+wss <- map_dbl(1:20, ~{kmeans(clstrData, ., nstart = 50, iter.max = 50)$tot.withinss})
+nClusters <- 1:20
+pltElbow <- as.data.frame(cbind("nClusters" = nClusters, "wss" = wss))
+
+#ggplot(pltElbow) + 
+#geom_line(aes(y = wss, x = nClusters), colors = '#82518c') 
+
+```
+<pre>
+
+
+
+
+</pre>
+### The trajectories of all significant genes clustered
+```{r timeconditionInteractionClusteringSIG, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+### THE CENTER LINE DOES NOT WORK
+
+## clustering my data with k-means
+clusters <- kmeans(clstrData, centers = 6, nstart = 100, iter.max = 50)
+centers <- rownames_to_column(as.data.frame(clusters$centers), "cluster")
+clusters$centers <- clusters$centers[,1:3]  # if clusters$centers is broken again 
+clstrData <- clstrData %>% mutate(cluster = clusters$cluster)
+
+# making my table long again for plotting
+clstrDataLong <- data.frame()
+clstrDataLong <- clstrData %>% 
+  mutate(gene = rownames(clstrData)) %>% 
+  pivot_longer(cols = c(-cluster, -gene), names_to = "timeCond", values_to = "mean") %>%
+  mutate(mean = as.numeric(mean))
+clstrDataLong$timeCond <- factor(clstrDataLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx"))
+clstrDataLong$condition <- ifelse(grepl("4Rx", clstrDataLong$timeCond), "4Rx", "ctrl")
+clstrDataLong$cluster <- factor(clstrDataLong$cluster, levels = c("1", "2", "3", "4", "5", "6"))
+clstrDataLong <- clstrDataLong[order(clstrDataLong$cluster),]
+clstrDataLong$timepoint <- rep("day3", nrow(clstrDataLong))
+clstrDataLong$timepoint[grepl("day7",clstrDataLong$timeCond)] <- "day7"
+clstrDataLong$timepoint[grepl("day14",clstrDataLong$timeCond)] <- "day14"
+clstrDataLong$timepoint <- factor(clstrDataLong$timepoint, levels = c("day3", "day7", "day14"))
+clstrDataLong$label <- ifelse(clstrDataLong$timepoint == "day14", as.character(clstrDataLong$gene), NA_character_)
+
+
+centersLong <- centers %>% 
+  pivot_longer(cols = -cluster, names_to = "timeCond", values_to = "mean")
+centersLong$timeCond <- factor(centersLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx"))
+head(centersLong)
+centersLong$cluster <- factor(centersLong$cluster, levels = c("1", "2", "3", "4", "5", "6"))
+centersLong <- centersLong[order(centersLong$cluster),]
+centersLong$timeCond <- factor(centersLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day14-4Rx", "day7-4Rx", "day3-4Rx"))
+
+head(clstrDataLong, n= 20)
+head(centersLong)
+
+
+plotTraject <- ggplot(data = clstrDataLong, aes(y = mean, x = timepoint, group = gene, colour = condition)) +
+  #geom_line(data = centersLong, aes(y = mean, x = timeCond, group = cluster), col = "#b58900", size = 10) +
+  geom_line(data = clstrDataLong, aes(y = mean, x = timepoint, group = gene, colour = condition), size = 2) +
+  facet_wrap(~cluster + condition, nrow = 3) + 
+  scale_color_manual(values = c("#82518c", "#10a7a7")) +
+  geom_label_repel(aes(label = label), nudge_x = 1, na.rm = TRUE, segment.color = "transparent", size = 3) +
+  theme_dark() + 
+  ggtitle("K-means clustering of rlog-transformed trajectories scaled on a gene-condition level, sequential")
+
+plotTraject
+
+ggsave("/projects/neuronet/neuronet/results/pdf/timeTrajectorySig.pdf" ,plot = p1, device = "pdf")
+
+
+```
+<pre>
+
+
+
+
+</pre>
+### The trajectories of all genes clustered elbowplot
+```{r timeconditionInteractionClusteringALLElbow, message = FALSE, warning = FALSE, results = FALSE, fig.height = 8, fig.width = 8, fig.align = "center"}
+## tscR, mfuzz, TMixClust DID NOT WORK FOR ME
+
+## how about classical k-means clustering 
+# https://www.r-bloggers.com/2019/10/cluster-multiple-time-series-using-k-means-2/ 
+
+## ON MY TIME INTERACTION DATA significant results rlog transformed
+pltData <- data.frame(t(assay(rlogTime)))
+pltData$timepoint <- samplesTime$timepoint
+pltData$condition <- samplesTime$condition
+pltData$group <- samplesTime$group
+
+pltData <- melt(pltData, id.vars = c("timepoint", "condition", "group"))
+pltMeans <- aggregate(pltData$value, list(pltData$group, pltData$variable), FUN = mean)
+pltData <- merge(pltData, pltMeans, by.x = c("group", "variable"), by.y = c("Group.1", "Group.2"))
+names(pltData) <- c("group", "variable", "timepoint", "condition", "value", "means")
+pltData$timepoint <- factor(pltData$timepoint, levels = c("day3", "day7", "day14"))
+pltData <- arrange(pltData, variable, timepoint)
+
+# spreading my data
+clstrData <- unique(pltData[,c("variable", "condition", "timepoint", "means")])
+clstrData$timeCond <- paste(clstrData$timepoint, clstrData$condition, sep = "-")
+clstrData$condition <- NULL; clstrData$timepoint <- NULL
+
+clstrData <- data.frame(t(spread(clstrData, variable, means)))
+colnames(clstrData) <- clstrData[1,]
+clstrData <- clstrData[-c(1),]
+clstrData <- mutate_all(clstrData, function(x) as.numeric(as.character(x)))
+clstrData <- clstrData - rowMeans(clstrData)
+clstrData <- clstrData[, c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx")]
+
+head(clstrData)
+
+# how many clusters would make sense
+wss <- map_dbl(1:20, ~{kmeans(clstrData, ., nstart = 50, iter.max = 50)$tot.withinss})
+nClusters <- 1:20
+pltElbow <- as.data.frame(cbind("nClusters" = nClusters, "wss" = wss))
+
+#ggplot(pltElbow) + 
+#geom_line(aes(y = wss, x = nClusters), colors = '#82518c') 
+
+```
+<pre>
+
+
+
+
+</pre>
+### The trajectories of all genes clustered
+```{r timeconditionInteractionClusteringALL, message = FALSE, warning = FALSE, results = FALSE, fig.height = 16, fig.width = 16, fig.align = "center"}
+### THE CENTER LINE DOES NOT WORK
+
+## clustering my data with k-means
+clusters <- kmeans(clstrData, centers = 20, nstart = 100, iter.max = 50)
+centers <- rownames_to_column(as.data.frame(clusters$centers), "cluster")
+clstrData <- clstrData %>% mutate(cluster = clusters$cluster)
+
+clusters$centers
+
+# making my table long again for plotting
+clstrDataLong <- data.frame()
+clstrDataLong <- clstrData %>% 
+  mutate(gene = rownames(clstrData)) %>% 
+  pivot_longer(cols = c(-cluster, -gene), names_to = "timeCond", values_to = "mean") %>%
+  mutate(mean = as.numeric(mean))
+clstrDataLong$timeCond <- factor(clstrDataLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx"))
+clstrDataLong$condition <- ifelse(grepl("4Rx", clstrDataLong$timeCond), "4Rx", "ctrl")
+clstrDataLong$cluster <- factor(clstrDataLong$cluster, levels = seq(from = 1, to = nrow(centers), by = 1))
+clstrDataLong <- clstrDataLong[order(clstrDataLong$cluster),]
+clstrDataLong$timepoint <- rep("day3", nrow(clstrDataLong))
+clstrDataLong$timepoint[grepl("day7",clstrDataLong$timeCond)] <- "day7"
+clstrDataLong$timepoint[grepl("day14",clstrDataLong$timeCond)] <- "day14"
+clstrDataLong$timepoint <- factor(clstrDataLong$timepoint, levels = c("day3", "day7", "day14"))
+
+
+centersLong <- centers %>% 
+  pivot_longer(cols = -cluster, names_to = "timeCond", values_to = "mean")
+centersLong$timeCond <- factor(centersLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day3-4Rx", "day7-4Rx", "day14-4Rx"))
+head(centersLong)
+centersLong$cluster <- factor(centersLong$cluster, levels = seq(from = 1, to = nrow(centers), by = 1))
+centersLong <- centersLong[order(centersLong$cluster),]
+centersLong$timeCond <- factor(centersLong$timeCond, levels = c("day3-ctrl", "day7-ctrl", "day14-ctrl", "day14-4Rx", "day7-4Rx", "day3-4Rx"))
+
+
+
+plotTraject <- ggplot(data = clstrDataLong, aes(y = mean, x = timepoint, group = gene, colour = condition)) +
+  #geom_line(data = centersLong, aes(y = mean, x = timeCond, group = cluster), col = "#b58900", size = 10) +
+  geom_line(data = clstrDataLong, aes(y = mean, x = timepoint, group = gene, colour = condition), size = 0.25) +
+  facet_wrap(~cluster + condition, nrow = 5) + 
+  scale_color_manual(values = c("#82518c", "#10a7a7")) +
+  theme_dark() + 
+  ggtitle("K-means clustering of rlog-transformed trajectories scaled on a gene-condition level, sequential")
+
+
+plotTraject
+
+ggsave("/projects/neuronet/neuronet/results/pdf/timeTrajectoryAll.pdf" ,plot = p1, device = "pdf")
+
+
+```
