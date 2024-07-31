@@ -1,9 +1,8 @@
 # rnaseq
 University Hospital Essen, NeuroScienceLab
 
-In this repository I provide the code that I am using for RNA-sequencing data analysis in the course of my employment at the University Hospital Essen. We are working predominantly of bulk RNAseq data from either mice (middle cerebral artery occlusion model) or from human patients. The sequencing data is used for differential gene expression analysis and then for gene set enrichment analysis. 
-
-I usually have a long script from which I execute small code snippets consecutively, cause I find it convenient, fast and versatile. 
+In this repository I provide a pipeline for bulk RNA seq data analysis. 
+I created the pipeline at the University Hospital Essen, for the analysis of data from human ischemic stroke patients and/or from a stroke biomodel (mouse - middle cerebral artery occlusion model). Our aim was to do differential gene expression analysis and gene set enrichment analysis.
 
 A small description to some of the scripts in this repository: 
 
