@@ -266,7 +266,7 @@ zcat $gtfFile | awk -F "\t" '$3=="transcript"{split($9,a,";"); split(a[3],b,"\""
 split(a[5],c,"\""); print b[2]","c[2]}' > "$tx2geneFile"
 
 
-## CONTINUATION OF THE PIPLINE IN SCRIPT "flow_neuronet.Rmd"
+## CONTINUATION OF THE PIPLINE IN SCRIPT "pipeline.Rmd"
 
 
 rename --verbose 's/001/ipsiPenumbra/' *fastq.gz
